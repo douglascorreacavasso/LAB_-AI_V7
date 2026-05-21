@@ -74,14 +74,54 @@ function actionDoubt(args){
   // Se tem palavra desconhecida significativa, pergunta sobre ela
   if(parseInfo?.palavras_desconhecidas?.length > 0){
     // Filtra desconhecidas que são significativas (não números/símbolos)
-    const candidatas = parseInfo.palavras_desconhecidas.filter(p => {
+    let candidatas = parseInfo.palavras_desconhecidas.filter(p => {
       const t = (p.txt || '').trim();
       if(t.length <= 1) return false;
       if(/^[0-9+\-*/=?!.,]+$/.test(t)) return false;
       return true;
     });
 
-    if(candidatas.length > 0){
+    // ===== v7.1-A: FILTRO POR DICIONÁRIO =====
+    // Se a palavra está no dicionário base, NÃO pergunta.
+    // Pode ter virado word-node novo por azar (ex: forma rara de verbo),
+    // mas como tem entrada no dict, é palavra conhecida da língua.
+    if(typeof dictKnows === 'function'){
+      candidatas = candidatas.filter(p => {
+        const t = (p.txt || '').toLowerCase();
+        return !dictKnows(t);
+      });
+    }
+
+    // ===== v7.1-A: FILTRO POR TYPO =====
+    // Se a palavra é typo de algo conhecido, corrige em silêncio.
+    // Não cria provisional, não pergunta.
+    if(typeof learnDetectarTypo === 'function' && typeof learnAplicarTypo === 'function'){
+      const sobraram = [];
+      for(const p of candidatas){
+        const t = (p.txt || '').toLowerCase();
+        const typo = learnDetectarTypo(t, {max_dist: 2});
+        if(typo && typo.ehTypo){
+          // Aplica correção silenciosa
+          learnAplicarTypo({
+            palavra_errada_id: p.word_id,
+            palavra_certa:     typo.candidato,
+            turnoInfo,
+          });
+          // Não vai virar provisional
+        } else {
+          sobraram.push(p);
+        }
+      }
+      candidatas = sobraram;
+    }
+
+    if(candidatas.length === 0){
+      _addIterLogD(turnoInfo, 'infer',
+        `doubt: todas as palavras "desconhecidas" foram resolvidas (dict ou typo) — não pergunto`,
+        {});
+      decidiu_perguntar = false;
+      ask_args = null;
+    } else {
       // PRIORIDADE 1: palavra desconhecida no PREDICADO (estrutural)
       // PRIORIDADE 2: palavra desconhecida no VALOR (instância)
       // PRIORIDADE 3: qualquer outra

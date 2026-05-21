@@ -195,6 +195,13 @@ function _iter_parse(mensagem, turnoInfo){
       id = 'op_' + _symMapEng[tok];
       wn = STATE.nodes.find(n => n.id === id);
     }
+    // v7.1-A: procura dict_X (dicionário base de PT)
+    if(!wn){
+      const did = 'dict_' + tok.replace(/[^a-z0-9_]/g, '');
+      if(did !== 'dict_'){
+        wn = STATE.nodes.find(n => n.id === did);
+      }
+    }
     // Senão, lookup word_X normal
     if(!wn){
       id = 'word_' + tok.replace(/[^a-z0-9_]/g, '');

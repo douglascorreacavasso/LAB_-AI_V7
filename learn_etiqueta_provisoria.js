@@ -41,13 +41,55 @@ function learnPromoverProvisional(args){
   if(!categoria_dita) return {promovida: false, motivo: 'sem categoria_dita'};
 
   // ============================================================
+  // v7.1-A: SANITIZAÇÃO DA CATEGORIA
+  // Se categoria_dita é texto longo (>5 palavras ou >50 chars),
+  // tenta extrair só o NÚCLEO (substantivo + adjetivo opcional).
+  // Evita poluir a rede com phrases gigantes virando concept.
+  // ============================================================
+  let catLimpa = categoria_dita;
+  const tokensCat = norm(categoria_dita).split(' ').filter(t => t && !STOPWORDS.has(t));
+  if(tokensCat.length > 5 || categoria_dita.length > 50){
+    // Tenta extrair núcleo: pega os 2-3 primeiros tokens significativos
+    // depois de "é" / "uma" / "um" / "o" / "a"
+    const m = norm(categoria_dita).match(/(?:é\s+(?:uma|um|o|a|os|as)?\s*)?([a-z]+(?:\s+[a-z]+){0,2})/);
+    if(m && m[1]){
+      catLimpa = m[1].trim();
+    } else {
+      // fallback: pega os primeiros 2 substantivos do dicionário
+      const subs = [];
+      for(const tok of tokensCat){
+        if(typeof dictClasse === 'function' && dictClasse(tok) === 'substantivo'){
+          subs.push(tok);
+          if(subs.length >= 2) break;
+        }
+      }
+      if(subs.length > 0) catLimpa = subs.join(' ');
+      else catLimpa = tokensCat.slice(0, 2).join(' ');
+    }
+
+    if(turnoInfo){
+      turnoInfo.iteracoes.push({
+        n:         turnoInfo.iteracoes.length + 1,
+        kind:      'infer',
+        descricao: `learn: categoria limpa de "${categoria_dita.slice(0,40)}..." → "${catLimpa}"`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  // ============================================================
   // 1. NORMALIZA o nome da categoria (cria id estável)
   // ex: "parte do corpo" → "concept_parte_corpo"
   // ============================================================
-  const catNorm = norm(categoria_dita)
+  const catNorm = norm(catLimpa)
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9_]/g, '');
   const conceptId = 'concept_' + catNorm;
+
+  // Se conceptId ficou degenerado (curto demais), aborta promoção
+  if(catNorm.length < 2){
+    return {promovida: false, motivo: 'categoria limpa ficou vazia'};
+  }
 
   // ============================================================
   // 2. CRIA ou encontra concept oficial
@@ -61,7 +103,7 @@ function learnPromoverProvisional(args){
       type:        'concept',
       layer:       'core',
       origin_type: 'ORGANIC_LEARNING',
-      text:        categoria_dita,
+      text:        catLimpa,
       mass:        3,
       energy:      0,
       is_anchor:   1,

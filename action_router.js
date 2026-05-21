@@ -32,6 +32,31 @@ function actionRouter(parseInfo, userInputNodeId, turnoInfo){
   const acoesDisparadas = [];
 
   // ============================================================
+  // PRÉ-ROTA: CORREÇÃO DE TYPO (v7.1-A)
+  // Antes de tudo: se a frase é "ops escrevi errado, era X" ou similar,
+  // resolve o typo retroativamente e responde com clareza.
+  // ============================================================
+  if(typeof actionCorrecaoTypo === 'function'){
+    const inputN = STATE.nodes.find(n => n.id === userInputNodeId);
+    const textoOrig = inputN?.text || '';
+    const correcao = actionCorrecaoTypo({
+      textoOrig, userInputNodeId, turnoInfo,
+    });
+    if(correcao && correcao.acao_tomada !== 'nenhuma'){
+      const r = actionSpeak({
+        contexto:        'composto',
+        parseNodeId:     parseInfo.parse_node_id,
+        userInputNodeId, turnoInfo,
+      });
+      const outNode = STATE.nodes.find(n => n.id === r.output_node_id);
+      if(outNode) outNode.text = correcao.mensagem;
+      r.resposta_txt = correcao.mensagem;
+      acoesDisparadas.push('correcao_typo');
+      return {...r, acoes_disparadas: acoesDisparadas};
+    }
+  }
+
+  // ============================================================
   // PRÉ-ROTA: MATEMÁTICA (C2)
   // Antes de qualquer outra coisa, testa se é:
   //   (a) pergunta matemática → actionCompute aplica rule aprendida
@@ -106,13 +131,15 @@ function actionRouter(parseInfo, userInputNodeId, turnoInfo){
     //
     // EXCEÇÃO: se modo é feedback_neg/pos, NÃO consome pendingClarify
     //   (feedback tem prioridade — pode estar corrigindo write anterior)
+    //
+    // v7.1-A: NOVO — aceita TAMBÉM explicações longas que começam com
+    //   padrões explicativos claros (Significa, É uma, É o, Quer dizer, etc).
+    //   Isso resolve o bug do v7 onde frases de 130+ chars caíam em "não sei".
     const inputN = STATE.nodes.find(n => n.id === userInputNodeId);
     const tOrig = norm(inputN?.text || '');
     const tokensIn = tOrig.split(' ').filter(t => t && !STOPWORDS.has(t));
     const modoFeedback = (modo === 'feedback_neg' || modo === 'feedback_pos');
 
-    // "errado" sozinho ainda é considerado resposta (negação simples)
-    // Mas "errado, é X" (mais de 2 tokens) já é correção semântica — pula
     const ehConfNegSimples = /^(sim|nao|não|isso|certo|correto|errado|exato|claro)\s*\.?$/.test(tOrig);
     const ehConfNeg = ehConfNegSimples;
     const comecaComTermo = pcContext.term && tOrig.startsWith(pcContext.term + ' ');
@@ -121,8 +148,13 @@ function actionRouter(parseInfo, userInputNodeId, turnoInfo){
     const ehFraseCurtaSemVerbo = tokensIn.length <= 2 &&
                                  !/\b(é|sao|são|tem|tenho|=)\b/i.test(tOrig);
 
+    // v7.1-A: padrões explicativos longos
+    const ehExplicacaoLonga = /^(significa|quer dizer|é (uma|um|o|a)|sao |são |é quando|seria|trata-se|refere-se)/i.test(tOrig) ||
+                              /^(uma|um|o|a) [a-z]+ (que|usad|para)/i.test(tOrig);
+
     const ehResposta = !modoFeedback && (
-      ehConfNeg || comecaComTermo || ehAtribuicaoDoTermo || ehFraseCurtaSemVerbo
+      ehConfNeg || comecaComTermo || ehAtribuicaoDoTermo ||
+      ehFraseCurtaSemVerbo || ehExplicacaoLonga
     );
 
     if(ehResposta){
@@ -544,15 +576,22 @@ function actionRouter(parseInfo, userInputNodeId, turnoInfo){
 
 // ============================================================
 // HELPER: detecta se a pergunta é de recall
-// "o que sabe sobre mim", "lista o que sabe", "que sabe sobre douglas"
+// "o que sabe sobre mim", "lista o que sabe", "que sabe sobre douglas",
+// + v7.1-A: "qual é o meu nome", "quem sou", "como me chamo", "qual meu X"
 // ============================================================
 function _ehPerguntaRecall(parseInfo, userInputNodeId){
   const inputNode = STATE.nodes.find(n => n.id === userInputNodeId);
   if(!inputNode) return false;
   const t = norm(inputNode.text || '');
 
-  // padrões textuais simples — palavras-chave
-  return /(sabe|lembra|conhece|lista|listar|enumera)/.test(t);
+  // padrões explícitos de recall sobre o user/self
+  if(/(sabe|lembra|conhece|lista|listar|enumera)/.test(t)) return true;
+  // perguntas diretas sobre atributos próprios
+  if(/(qual|quem|como|que)\s+(é|eh|sou|me chamo|meu|minha|meus|minhas|seu|sua)/.test(t)) return true;
+  if(/^(qual|quem|como|que).*?(nome|apelido|idade|nasci|moro|gosto|prefer)/.test(t)) return true;
+  if(/quem (sou|é) (eu|voce|você)/.test(t)) return true;
+  if(/como me chamo|como eu me chamo|qual meu nome/.test(t)) return true;
+  return false;
 }
 
 // Decide: a pergunta é sobre "mim" (user) ou sobre "voce" (self)?
