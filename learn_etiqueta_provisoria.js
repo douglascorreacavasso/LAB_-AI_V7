@@ -41,37 +41,94 @@ function learnPromoverProvisional(args){
   if(!categoria_dita) return {promovida: false, motivo: 'sem categoria_dita'};
 
   // ============================================================
-  // v7.1-A: SANITIZAÇÃO DA CATEGORIA
-  // Se categoria_dita é texto longo (>5 palavras ou >50 chars),
-  // tenta extrair só o NÚCLEO (substantivo + adjetivo opcional).
-  // Evita poluir a rede com phrases gigantes virando concept.
+  // v7.1-B: SANITIZAÇÃO FORTE DA CATEGORIA
+  // Se categoria_dita é texto longo, pega SÓ o primeiro substantivo do
+  // dicionário. Se não há substantivo claro, REJEITA a promoção.
+  // Evita criar concept_cumprimento_e_uma / concept_significa_fazer_algo.
   // ============================================================
   let catLimpa = categoria_dita;
   const tokensCat = norm(categoria_dita).split(' ').filter(t => t && !STOPWORDS.has(t));
-  if(tokensCat.length > 5 || categoria_dita.length > 50){
-    // Tenta extrair núcleo: pega os 2-3 primeiros tokens significativos
-    // depois de "é" / "uma" / "um" / "o" / "a"
-    const m = norm(categoria_dita).match(/(?:é\s+(?:uma|um|o|a|os|as)?\s*)?([a-z]+(?:\s+[a-z]+){0,2})/);
-    if(m && m[1]){
-      catLimpa = m[1].trim();
-    } else {
-      // fallback: pega os primeiros 2 substantivos do dicionário
-      const subs = [];
-      for(const tok of tokensCat){
-        if(typeof dictClasse === 'function' && dictClasse(tok) === 'substantivo'){
-          subs.push(tok);
-          if(subs.length >= 2) break;
-        }
+
+  // Sempre tenta sanitizar — não só pra texto longo
+  if(tokensCat.length > 2 || categoria_dita.length > 30){
+    // Estratégia: procura primeiro substantivo do dicionário (não verbo, não interjeição, não conectivo)
+    // Estratégia melhorada: prefere substantivo que vem APÓS um verbo de definição
+    // ("significa", "é", "trata-se") — ou o primeiro absoluto.
+    let substantivoEncontrado = null;
+    let qualificadorAdjetivo  = null;
+
+    // Marca posição de verbos de definição
+    const verbosDefinicao = ['significa','quer dizer','é','eh','sao','são','trata','refere'];
+    let posInicio = 0;
+    for(let i = 0; i < tokensCat.length; i++){
+      if(verbosDefinicao.includes(tokensCat[i])){
+        posInicio = i + 1;
+        break;
       }
-      if(subs.length > 0) catLimpa = subs.join(' ');
-      else catLimpa = tokensCat.slice(0, 2).join(' ');
     }
 
-    if(turnoInfo){
+    for(let i = posInicio; i < tokensCat.length; i++){
+      const tok = tokensCat[i];
+      // Pula palavras estruturais
+      if(['e','é','eh','sao','são','que','uma','um','o','a','os','as','de','do','da','dos','das','para','com','em','no','na','por','algo','quando','onde','isso','aquilo'].includes(tok)) continue;
+      // Pula a palavra que está sendo definida (não pode ser ela mesma)
+      const provNode = STATE.nodes.find(n => n.id === provisional_id);
+      const palavraAlvo = provNode?._categoria_alvo;
+      if(palavraAlvo && tok === norm(palavraAlvo)) continue;
+
+      const classe = typeof dictClasse === 'function' ? dictClasse(tok) : null;
+
+      if(classe === 'substantivo' && !substantivoEncontrado){
+        substantivoEncontrado = tok;
+        // Procura adjetivo seguinte
+        if(i + 1 < tokensCat.length){
+          const next = tokensCat[i+1];
+          if(dictClasse && dictClasse(next) === 'adjetivo'){
+            qualificadorAdjetivo = next;
+          }
+        }
+        break;
+      }
+    }
+
+    if(substantivoEncontrado){
+      catLimpa = qualificadorAdjetivo
+        ? `${substantivoEncontrado} ${qualificadorAdjetivo}`
+        : substantivoEncontrado;
+    } else {
+      // SEM substantivo claro — REJEITA promoção
+      // Volta msg dizendo "anotei a definição mas não consegui criar categoria"
+      if(turnoInfo){
+        turnoInfo.iteracoes.push({
+          n:         turnoInfo.iteracoes.length + 1,
+          kind:      'warn',
+          descricao: `learn: não consegui extrair substantivo da definição "${categoria_dita.slice(0,50)}..." — guardo só no STATE.definitions`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      // Guarda definição em STATE.definitions pra recall futuro
+      const provNode = STATE.nodes.find(n => n.id === provisional_id);
+      const palavraAlvo = provNode?._categoria_alvo;
+      if(palavraAlvo){
+        STATE.definitions[palavraAlvo] = categoria_dita;
+      }
+      // Marca provisional como "definicao_guardada" (não promovida formalmente)
+      if(provNode){
+        provNode._status = 'definicao_guardada';
+        provNode._definicao = categoria_dita;
+      }
+      return {
+        promovida:    false,
+        motivo:       'sem substantivo claro na definição — guardado em STATE.definitions',
+        catLimpa:     null,
+      };
+    }
+
+    if(turnoInfo && catLimpa !== categoria_dita){
       turnoInfo.iteracoes.push({
         n:         turnoInfo.iteracoes.length + 1,
         kind:      'infer',
-        descricao: `learn: categoria limpa de "${categoria_dita.slice(0,40)}..." → "${catLimpa}"`,
+        descricao: `learn: sanitizou "${categoria_dita.slice(0,40)}..." → "${catLimpa}"`,
         timestamp: new Date().toISOString(),
       });
     }

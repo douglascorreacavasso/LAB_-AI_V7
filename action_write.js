@@ -46,6 +46,38 @@ function actionWrite(args){
   }
 
   // ============================================================
+  // v7.1-B: BLOQUEIA PREDICADO-FRASE
+  // Predicado tem que ser palavra-única OU substantivo-composto curto.
+  // Se for frase com verbo/conectivo/interjeição, é parse-error → aborta.
+  // Resolve: "sim mas nome", "claro", "ok", "obrigado" virando atributo.
+  // ============================================================
+  if(predicado){
+    const pred = String(predicado).toLowerCase().trim();
+    const palavras = pred.split(/\s+/);
+
+    // Mais de 2 palavras = frase, não predicado
+    if(palavras.length > 2){
+      _addIterLogW(turnoInfo, 'warn',
+        `write BLOQUEADO: predicado "${pred}" é frase, não atributo`,
+        {sujeito, predicado, valor});
+      return null;
+    }
+
+    // Contém verbo / conectivo / interjeição do dicionário = não é predicado
+    if(typeof dictClasse === 'function'){
+      for(const p of palavras){
+        const classe = dictClasse(p);
+        if(classe === 'verbo' || classe === 'conectivo' || classe === 'interjeicao'){
+          _addIterLogW(turnoInfo, 'warn',
+            `write BLOQUEADO: predicado "${pred}" contém ${classe} ("${p}") — não é atributo válido`,
+            {sujeito, predicado, valor, classe});
+          return null;
+        }
+      }
+    }
+  }
+
+  // ============================================================
   // 1. Garante nó-sujeito na rede
   // ============================================================
   let subjNode = _ensureSubjectNode(sujeito);

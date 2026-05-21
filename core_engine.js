@@ -90,18 +90,91 @@ async function calcular(mensagem){
   }
 
   // ============================================================
-  // ITER 5 — ROUTER (B1): orquestra ações
-  // Sem router (modo legacy A2), cai no decide+execute+speak simples
+  // ITER 4.5 — SIMULADOR (v7.1-B): testa N estratégias, escolhe a melhor
+  // ============================================================
+  let simResult = null;
+  if(parseInfo && typeof engineSimulate === 'function'){
+    simResult = engineSimulate({
+      entrada: mensagem,
+      parseRes, parseInfo, userInputNodeId, turnoInfo,
+    });
+  }
+
+  // ============================================================
+  // ITER 5 — ROUTER ou SIMULADOR (B1/v7.1-B)
+  // Se simulador escolheu estratégia VÁLIDA, aplica ela.
+  // Senão cai no router antigo.
   // ============================================================
   let routerRes = null;
   let resposta = null;
   let execRes = {action_node_ids: [], output_node_ids: []};
 
+  // Se simulador escolheu uma estratégia diferente de "pergunta_neutra"
+  // (que é o fallback), usa o router pra aplicar a estratégia equivalente.
+  // O simulador já testou — então o router vai dar OK na mesma rota.
+  // SE simulador escolheu pergunta_neutra → o router teria escolhido o mesmo →
+  // tanto faz qual chamamos.
   if(parseInfo && typeof actionRouter === 'function'){
     routerRes = actionRouter(parseInfo, userInputNodeId, turnoInfo);
     resposta = routerRes.resposta_txt;
     execRes.output_node_ids.push(routerRes.output_node_id);
     if(routerRes.speak_node_id) execRes.action_node_ids.push(routerRes.speak_node_id);
+
+    // v7.1-B: SE o router caiu em "hmm não sei" MAS o simulador achou
+    // candidata melhor, sobrescreve a resposta usando o output node existente.
+    // OU se o simulador tem candidata com custo MUITO menor (router pegou
+    // estratégia errada tipo recall sem ser pedido), também sobrescreve.
+    const respLower = (resposta || '').toLowerCase();
+    const ehRespostaPobre = /^(hmm|não sei|me ensina|me conta mais|mensagem vazia)/.test(respLower);
+
+    let deveSobrescrever = false;
+    if(ehRespostaPobre && simResult && simResult.resposta &&
+       simResult.melhor_estrategia !== 'pergunta_neutra' &&
+       !/^(hmm|não sei|me conta)/.test(simResult.resposta.toLowerCase())){
+      deveSobrescrever = true;
+    }
+
+    // v7.1-B SAFETY: nunca substituir por recall se user não pediu
+    if(deveSobrescrever && (simResult.melhor_estrategia === 'recall' ||
+                              simResult.melhor_estrategia === 'recall_self')){
+      const entOrig2 = (mensagem || '').toLowerCase().trim();
+      const tNorm2 = norm(mensagem || '').trim();
+      const realmentePediu =
+        /\?\s*$/.test(entOrig2) ||
+        /^(qual|quem|como|sabe|lembra|conhece|liste|listar|enumera|me diz)/.test(tNorm2) ||
+        /(o que sabe|que sabe sobre|lista o que)/.test(tNorm2);
+      if(!realmentePediu){
+        deveSobrescrever = false;     // melhor manter "hmm não sei" do que recall errado
+      }
+    }
+
+    // NOVO: detecta recall errado (sem o user ter perguntado)
+    // Se router falou tipo "seu nome é X" mas a entrada não tem palavra-pergunta NO INÍCIO,
+    // E o simulador escolheu outra estratégia, sobrescreve
+    const entLow = (mensagem || '').toLowerCase().trim();
+    const pediuRecall =
+      /\?$/.test(entLow) ||
+      /^(qual|quem|como|sabe|lembra|conhece|liste|listar|enumera|me diz)/.test(entLow) ||
+      /(o que sabe|que sabe sobre|lista o que)/.test(entLow);
+    const respondeuRecall = /^(seu nome|meu nome|meu apelido|douglas |voce |voce nome)/i.test(resposta || '');
+    if(!deveSobrescrever && respondeuRecall && !pediuRecall && simResult &&
+       simResult.melhor_estrategia !== 'recall' &&
+       simResult.melhor_estrategia !== 'recall_self' &&
+       simResult.melhor_estrategia !== 'pergunta_neutra'){
+      deveSobrescrever = true;
+    }
+
+    if(deveSobrescrever){
+      const outNode = STATE.nodes.find(n => n.id === routerRes.output_node_id);
+      if(outNode){
+        outNode.text = simResult.resposta;
+        outNode._simulator_chose = simResult.melhor_estrategia;
+      }
+      resposta = simResult.resposta;
+      _addIterLog(turnoInfo, 'infer',
+        `simulator-override: router escolheu mal, simulador escolheu "${simResult.melhor_estrategia}" → "${simResult.resposta.slice(0,60)}"`,
+        {estrategia: simResult.melhor_estrategia, custo: simResult.candidatas?.[0]?.custo});
+    }
   } else {
     // Fallback: lógica simples (A2)
     const decisao = _iter_decide(recallRes.conceitos_ativos, recallRes.templates_ativos, parseRes, turnoInfo);

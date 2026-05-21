@@ -139,17 +139,11 @@ function actionCorrecaoTypo(args){
     });
 
     if(r.aplicou){
-      // Acha texto do erro pra mensagem
-      const erradoNode = STATE.nodes.find(n => n.id === r.palavra_certa_id);
-      const certoText  = erradoNode?.text || det.palavra_certa;
-
-      // Pega o último typo corrigido pra usar como referência
-      const profile = STATE.userTypoProfile || {erros_frequentes: {}};
-      const ultimoErro = Object.entries(profile.erros_frequentes)
-        .filter(([k, v]) => v === det.palavra_certa)
-        .pop();
-
-      const palavraErradaUsada = ultimoErro ? ultimoErro[0] : '(palavra anterior)';
+      // Pega o text REAL do node corrigido (o erradoNode original)
+      const certoNode = STATE.nodes.find(n => n.id === r.palavra_certa_id);
+      // o aplicador setou erradoNode._typo_correto = certoNode.id, então achamos o erradoNode
+      const erradoNode = STATE.nodes.find(n => n._typo_correto === r.palavra_certa_id);
+      const palavraErradaUsada = erradoNode?.text || '(palavra anterior)';
 
       return {
         acao_tomada:        'corrigido_retroativo',

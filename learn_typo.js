@@ -244,24 +244,32 @@ function learnCorrecaoRetroativa(args){
   const {palavra_certa, userInputNodeId, turnoInfo} = args;
   if(!palavra_certa) return {aplicou: false, motivo: 'sem palavra certa fornecida'};
 
-  // Procura últimos word-nodes provisionais (criados nos últimos 5 turnos)
+  // Procura últimos word-nodes provisionais (criados nos últimos 3 turnos)
   const turnoAtual = STATE.turn;
   const candidatos = STATE.nodes.filter(n =>
     n.type === 'word' &&
-    (n._provisional || n._eh_typo === false) &&
     !n._seed &&
-    !n._eh_dicionario
+    !n._eh_dicionario &&
+    !n._eh_typo &&
+    !n._origem_user
   ).sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
 
   // Pega o mais próximo (Levenshtein) entre os candidatos recentes
   let melhor = null;
   let menorDist = Infinity;
   const pNorm = norm(palavra_certa);
-  for(const cand of candidatos.slice(0, 15)){
+  // v7.1-B: só candidatos com lastAccessed recente (últimos 3 turnos)
+  const recentes = candidatos.filter(c =>
+    (c.lastAccessed || 0) >= (turnoAtual - 3)
+  ).slice(0, 8);  // top 8 mais recentes
+  for(const cand of recentes){
     const cText = (cand.text || '').toLowerCase();
     if(cText === pNorm) continue;
+    if(cText.length < 3) continue;     // muito curto
     const d = _levenshtein(cText, pNorm);
-    if(d < menorDist && d <= 3){
+    // distância tem que ser baixa E proporcional ao tamanho (50% max)
+    const maxAllowed = Math.min(3, Math.floor(Math.max(cText.length, pNorm.length) * 0.5));
+    if(d < menorDist && d <= maxAllowed){
       menorDist = d;
       melhor = cand;
     }

@@ -584,13 +584,19 @@ function _ehPerguntaRecall(parseInfo, userInputNodeId){
   if(!inputNode) return false;
   const t = norm(inputNode.text || '');
 
-  // padrões explícitos de recall sobre o user/self
-  if(/(sabe|lembra|conhece|lista|listar|enumera)/.test(t)) return true;
-  // perguntas diretas sobre atributos próprios
-  if(/(qual|quem|como|que)\s+(é|eh|sou|me chamo|meu|minha|meus|minhas|seu|sua)/.test(t)) return true;
-  if(/^(qual|quem|como|que).*?(nome|apelido|idade|nasci|moro|gosto|prefer)/.test(t)) return true;
-  if(/quem (sou|é) (eu|voce|você)/.test(t)) return true;
-  if(/como me chamo|como eu me chamo|qual meu nome/.test(t)) return true;
+  // v7.1-B FIX: padrões EXPLÍCITOS de recall
+  // Precisa de palavra-pergunta no INÍCIO + termo-alvo
+  // "seu nome será nerael" NÃO é recall (não tem pergunta)
+  // "qual seu nome?" É recall
+  if(/^(sabe|lembra|conhece|lista|listar|enumera)/.test(t)) return true;
+  if(/(sabe|lembra|conhece) (sobre|de|o que)/.test(t)) return true;
+  // perguntas explícitas
+  if(/^(qual|quem|como|o que|oque|que)\b/.test(t)){
+    if(/(meu|minha|seu|sua|me chamo|nome|apelido)/.test(t)) return true;
+  }
+  if(/\?$/.test(t.trim()) && /(qual|quem|como|me chamo|meu nome|seu nome)/.test(t)) return true;
+  if(/(quem sou|quem é eu|quem é voce)/.test(t)) return true;
+  if(/(como me chamo|qual meu nome)/.test(t)) return true;
   return false;
 }
 

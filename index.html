@@ -460,6 +460,9 @@ main {
 <script src="learn_typo.js"></script>
 <script src="learn_correcao_typo.js"></script>
 
+<!-- v7.1-B — simulador de candidatas -->
+<script src="engine_simulator.js"></script>
+
 <script src="action_router.js"></script>
 
 <script>
@@ -477,7 +480,7 @@ STATE.session_atual = newSessionId();
 STATE.bootedAt = nowT();
 
 // 2. Atualiza UI tag da leva
-document.querySelector('.leva-tag').textContent = 'v7.1-A · dict + typo';
+document.querySelector('.leva-tag').textContent = 'v7.1-B · simulador + dict';
 
 // 3. Aplica seed (cria Self-Core + ~70 nós + arestas iniciais)
 const seedCount = applySeed();
